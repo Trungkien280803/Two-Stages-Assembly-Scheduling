@@ -1,0 +1,118 @@
+/*********************************************
+ * OPL 22.1.1.0 Model
+ * Author: admin
+ * Creation Date: 10 Oct 2024 at 00:41:29
+ *********************************************/
+int I = ...;
+int J = ...;
+int K = ...;
+int L = ...;
+float lamda = ...;
+float p[1..J]=...;
+float as[1..I]=...;
+int o[1..I][1..J]=...;
+float TS[1..J]=...;
+int M = 100000;
+dvar boolean X[1..J][1..L];
+dvar boolean G[1..K][1..L];
+dvar boolean Y[1..I][1..K];
+dvar boolean D[1..L];
+dvar boolean Q[1..K][1..L];
+dvar boolean z[1..J][1..L];
+dvar float+ R[1..J][1..K][1..L];
+dvar float+ F[1..K];
+dvar float+ H[1..K];
+dvar float+ Cc[1..J][1..L];
+dvar float+ Cp[1..J][1..K];
+dvar float+ TC[1..J][1..L];
+dvar float+ TP[1..K];
+dvar float+ Avt[1..K][1..L];
+dvar float+ W[1..L];
+dvar float+ MP;
+minimize MP ;
+ subject to {
+  	 ct1:
+  	 forall (l in 1..L)
+	    sum(j in 1..J) X[j][l] == 1;
+	 ct2:
+	 forall (j in 1..J)
+	    sum(l in 1..L) X[j][l] == sum(i in 1..I) o[i][j];
+	 ct3:
+	 forall (k in 1..K)
+	    sum(i in 1..I) Y[i][k]  == 1;
+	 ct4:
+	 forall (i in 1..I)
+	    sum(k in 1..K) Y[i][k]  == 1;
+	 ct5:
+	 forall (l in 1..L)
+	    sum(j in 1..J) z[1][l]  == D[l];
+	 ct5f:
+	  D[1]==0;
+	 ct5d:
+	 forall (j in 1..J, l in 2..L)
+	    X[j][l] + X[j][l-1] >=  2*z[l][j];
+	 ct5e:
+	 forall (j in 1..J, l in 2..L)
+	    X[j][l] + X[j][l-1] <=  1+z[j][l];
+	 ct6h:
+	 forall (j in 1..J, l in 1..L)
+	    TC[j][l] >= 0; 
+	 ct6o:
+	 forall (j in 1..J, l in 1..L)
+	     TC[j][l] <= M* X[j][l];
+	 ct6a:
+		sum(j in 1..J) TC[j][1] >= sum(j in 1..J) TS[j]*X[j][1]+ lamda + sum(j in 1..J)p[j]*X[j][1];	
+	 ct6b:
+	 forall (l in 2..L)
+	    sum(j in 1..J) TC[l][j] >= W[l] + lamda*(1-D[l])+ sum(j in 1..J)p[j]*X[j][l];		
+	 ct6c:
+	 forall (l in 2..L)
+	    W[l] >=  sum(j in 1..J) TC[j][l-1];
+	 ct6d:
+	 forall (l in 1..L)
+	    W[l] >=  sum(j in 1..J) TS[j]*X[j][l];
+	 ct7:
+	 forall (j in 1..J, l in 1..L)
+	   Cc[j][l] == sum(a in 1..l)X[j][a];
+	 ct8:
+	 forall (j in 1..J, k in 1..K)
+	   Cp[j][k] == sum(i in 1..I) (o[i][j]*sum(a in 1..k)Y[i][a]);	 
+	 ct9a:
+	 forall (j in 1..J, k in 1..K, l in 1..L)
+	   R[j][k][l] >= Cp[j][k]-Cc[j][l];	  
+	 ct9b:
+	 forall (j in 1..J, k in 1..K, l in 1..L)
+	   R[j][k][l] >= 0;	  	  	    	  
+	 ct9c:
+	 forall (j in 1..J, k in 1..K, l in 1..L)
+	   R[j][k][l] <= 100;	  
+	 ct10:
+	 forall (k in 1..K, l in 1..L)
+	 	Avt[k][l] == sum(j in 1..J) TC[j][l] + M *Q[k][l];
+	 ct11:
+	 forall (k in 1..K, l in 1..L)
+	 	M*Q[k][l]  >= sum(j in 1..J)R[j][k][l];	
+	 ct12a:
+     forall (k in 1..K, l in 1..L)
+       Avt[k][l]  >= F[k];
+	 ct12b:
+     forall (k in 1..K, l in 1..L)
+       F[k] >= Avt[k][l] - M*(1-G[k][l]);
+ 	 ct12c:
+     forall (k in 1..K)
+       sum(l in 1..L)G[k][l] == 1;      	 
+ 	 ct12d:
+       TP[1] >= F[1]+ sum(i in 1..I) as[i] * Y[i][1];
+     ct13a:
+     forall (k in 2..K)
+       H[k]>=TP[k-1] ;
+     ct13b:
+     forall (k in 2..K)
+       H[k]>=F[k] ;       
+     ct13c:
+     forall (k in 2..K)
+       TP[k]>=H[k] + sum(i in 1..I) as[i] * Y[i][k];    
+     ct14:
+     forall (k in 1..K)
+       MP >= TP[k]   ;
+}
