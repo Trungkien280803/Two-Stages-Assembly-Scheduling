@@ -1,0 +1,41 @@
+/*********************************************
+ * OPL 22.1.1.0 Model
+ * Author: admin
+ * Creation Date: 16 Oct 2024 at 20:43:50
+ *********************************************/
+int T = ...;
+int J = ...;
+int K = ...;
+int M = ...;
+int BigM = 100000;
+float P[1..T][1..J]=...;
+//float S[1..T][1..J]=...;
+float O[1..J]=...;
+dvar boolean Y[1..T][1..J][1..M];
+dvar boolean Z[1..T][1..J][1..K];
+dvar float+ C[0..T][1..J];
+dvar float+ FN[1..J];
+dvar float+ MP;
+minimize MP;
+subject to {
+  	 ct1:
+  	 forall (t in 1..T, j in 1..J)
+  	 sum(m in 1..M)Y[t][j][m] == 1  ;
+  	 ct2:
+  	 forall (t in 1..T, j in 1..J, m in 1..M)
+  	 C[t][j] >= C[t-1][j] + P[t][j]*O[j] - BigM*(1-Y[t][j][m]);
+  	 ct3:
+  	 forall (t in 0..T-1, j in 1..J, k in 1..K:k!=j, m in 1..M)
+  	 //C[t][j] >=C[t+1][k] + S[t+1][j] - BigM*(3-Z[t+1][j][k]-Y[t+1][j][m]-Y[t+1][k][m]);
+  	 C[t][j] >=C[t+1][k] + 30 - BigM*(3-Z[t+1][j][k]-Y[t+1][j][m]-Y[t+1][k][m]);
+  	 ct4:
+     forall (t in 0..T-1, j in 1..J, k in 1..K:k!=j, m in 1..M)
+     //C[t][k] >= C[t+1][j] +S[t+1][j] - BigM*Z[t+1][j][k]-BigM*(2-Y[t+1][j][m]-Y[t+1][k][m]);
+     C[t][k] >= C[t+1][j] + 30 - BigM*Z[t+1][j][k]-BigM*(2-Y[t+1][j][m]-Y[t+1][k][m]);
+     ct5:
+     forall (j in 1..J)
+     MP >= C[T][j];
+     ct6:
+     forall (j in 1..J)
+     FN[j] == C[T][j];
+}
