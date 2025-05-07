@@ -1,0 +1,250 @@
+import numpy as np
+import pandas as pd
+import random
+import time
+from collections import Counter
+file_path = r'C:/Users/admin/AppData/Roaming/IBM/ILOG/CPLEX_Studio2211/workspace/DoAnThietKe/Input.xlsx'
+Number_of_component = pd.read_excel(file_path, sheet_name='Practical_Number', index_col='Product type')
+processing_time = pd.read_excel(file_path, sheet_name='Practical_Processing_Time', header = 0).to_numpy().flatten()
+assembly_time = pd.read_excel(file_path, sheet_name='Practical_Assembly_Time', index_col = 'Product type', header = 0).to_numpy().flatten().T
+TS = pd.read_excel(file_path, sheet_name='Start_time', header = 0).values.flatten()
+
+def generate_random_order(df):
+    elements = []
+    order = list(df.columns)  # Lấy danh sách cột theo đúng thứ tự ban đầu
+    random.shuffle(order)  # Xáo trộn thứ tự xuất hiện của các cột
+    for col in order:
+        col_number = ''.join(filter(str.isdigit, str(col)))
+        count = df[col].sum()  # Tính tổng số lượng từ tất cả các hàng của cột đó
+    return elements
+
+def generate_record_order(df):
+    records = [int(''.join(filter(str.isdigit, str(idx)))) for idx in df.index]
+    random.shuffle(records)
+    return records
+
+def sequence_to_matrix(sequence):
+    unique_numbers = sorted(set(sequence))
+    num_counts = {num: 0 for num in unique_numbers}
+    rows = []
+    for num in sequence:
+        row = [0] * len(unique_numbers)
+        index = unique_numbers.index(num)
+        rows.append(row)
+    return np.array(rows).T, unique_numbers
+def compute_Cmax(Seqcom, Seqproduct, Number_of_component, processing_time, assembly_time, TS):
+    Seqcom_matrix, _ = sequence_to_matrix(Seqcom)
+    Seqproduct_matrix, _ = sequence_to_matrix(Seqproduct)
+    Com_index, Seqcom_index = Seqcom_matrix.shape
+    Product_index, Seqproduct_index = Seqproduct_matrix.shape
+    Number_of_component_matrix = Number_of_component.to_numpy()
+    E = np.zeros((Com_index, Seqcom_index))
+    for j in range(Com_index):
+        for l in range(1, Seqcom_index):
+            E[j, l] = max(Seqcom_matrix[j, l] + Seqcom_matrix[j, l-1], 1) - 1
+    E = np.round(E).astype(int)
+    D = np.sum(E, axis=0, keepdims=True)
+    TC = np.zeros(Seqcom_index).astype(float)
+    for j in range(Com_index):
+        if Seqcom_matrix[j, 0] == 1:
+            TC[0] = 30 + processing_time[j] + TS[j]
+    for l in range(1, Seqcom_index):
+        for j in range(Com_index):
+            if Seqcom_matrix[j, l] == 1:
+                TC[l] = 30 * (1 - D[0, l]) + processing_time[j] + max(TC[l-1], TS[j])
+    CC = np.cumsum(Seqcom_matrix, axis=1)
+    CP = np.zeros((Com_index, Seqproduct_index)).astype(int)
+    for j in range(Com_index):
+        for k in range(Seqproduct_index):
+            total = 0
+            for i in range(Seqproduct_index):
+                sum_Y = sum(Seqproduct_matrix[i, :k+1])
+                total += Number_of_component_matrix[i, j] * sum_Y
+            CP[j, k] = total
+    R = np.zeros((Com_index, Seqproduct_index, Seqcom_index)).astype(int)
+    for j in range(Com_index):
+        for k in range(Seqproduct_index):
+            for l in range(Seqcom_index):
+                R[j, k, l] = max(CP[j][k] - CC[j, l], 0)
+    Avt = np.where(R.sum(axis=0) == 0, 0, 1e6) + TC[np.newaxis, :]
+    TP = np.zeros(Seqproduct_index).astype(float)
+    min_Avt = np.min(Avt, axis=1)
+    F = np.zeros(Seqproduct_index).astype(float)
+    for k in range(Seqproduct_index):
+        for i in range(Seqproduct_index):
+            F[k] += assembly_time[i] * Seqproduct_matrix[i][k]
+    TP[0] = min_Avt[0] + F[0]
+    for k in range(1, Seqproduct_index):
+        TP[k] = max(min_Avt[k], TP[k-1]) + F[k]
+    return np.max(TP)
+
+def roulette_wheel_selection(fitness_list, k):
+    total_fitness = sum(fitness_list)
+    selection_probs = [f / total_fitness for f in fitness_list]
+    return random.choices(range(len(fitness_list)), weights=selection_probs, k =k)
+def mutate(sequence):
+    if len(sequence) < 1:
+        return sequence  # Nếu chuỗi quá ngắn, không thực hiện đột biến
+    unique_vals = list(set(sequence))
+    repeat_blocks = [val for val in unique_vals if sequence.count(val) > 2]
+    if repeat_blocks:
+        selected_value = random.choice(repeat_blocks)
+        indices = [i for i, x in enumerate(sequence) if x == selected_value]
+        cut_start = random.choice(indices[:-1])
+        cut_section = sequence[cut_start:cut_end]
+        del sequence[cut_start:cut_end]
+        insert_position = random.randint(0, len(sequence))
+        sequence[insert_position:insert_position] = cut_section
+    else:
+        # Nếu không có đoạn nào lặp lại, thực hiện hoán đổi ngẫu nhiên 1 điểm
+        idx1, idx2 = random.sample(range(len(sequence)), 2)
+        sequence[idx1], sequence[idx2] = sequence[idx2], sequence[idx1]
+    return sequence
+def mutate_remaining(population, selected_parents, mutation_rate):
+    remaining_indices = set(range(len(population))) - set(selected_parents)
+    for idx in remaining_indices:
+        if random.random() < mutation_rate:  # Xác suất đột biến
+            population[idx] = (mutate(population[idx][0]), mutate(population[idx][1]))
+    return population
+def remove_duplicates(population):
+    seen = set()
+    unique_population = []
+    
+    for individual in population:
+        # Chuyển danh sách thành tuple để có thể hash và kiểm tra trùng lặp
+        hashable_individual = tuple(map(tuple, individual))
+        
+        if hashable_individual not in seen:
+            seen.add(hashable_individual)
+            unique_population.append(individual)
+    
+    return unique_population
+def crossover1(parent1, parent2, percentage=50):
+    length = len(parent1)
+    num_points = max(1, (length * percentage) // 100)  # Xác định số điểm cần đổi
+    swap_points = random.sample(range(length), num_points)  # Chọn ngẫu nhiên vị trí để đổi
+    # Khởi tạo con bằng cách copy từ cha mẹ
+    child1, child2 = parent1[:], parent2[:]
+    for point in swap_points:
+        child1[point], child2[point] = parent2[point], parent1[point]
+    def fix_duplicates(child, original):
+        original_count = Counter(original)
+        child_count = Counter(child)
+        extra = {num: max(0, child_count[num] - original_count[num]) for num in child_count}
+        new_child = []
+        for num in child:
+            if extra.get(num, 0) > 0 and any(missing.values()):
+                for missing_num in missing:
+                    if missing[missing_num] > 0:
+                        new_child.append(missing_num)
+                        extra[num] -= 1
+                        break
+            else:
+                new_child.append(num)
+        return new_child
+    child1 = fix_duplicates(child1, parent1)
+    child2 = fix_duplicates(child2, parent2)
+    return child1, child2
+def crossover2(parent1, parent2):
+    point = random.randint(1, len(parent1) - 1)
+    child1 = parent1[:point]
+    child2 = parent2[:point]
+    count1 = Counter(child1)
+    count2 = Counter(child2)
+    original_count1 = Counter(parent1)
+    original_count2 = Counter(parent2)
+    for num in parent2:
+        if count1[num] < original_count1[num]:
+            child1.append(num)
+            count1[num] += 1
+    for num in parent1:
+        if count2[num] < original_count2[num]:
+            child2.append(num)
+            count2[num] += 1
+    return child1, child2
+import random
+from collections import Counter
+def crossover3(parent1, parent2):
+    size = len(parent1)
+    cut1, cut2 = sorted(random.sample(range(size), 2))
+    middle_segment_1 = parent1[cut1:cut2+1]
+    middle_segment_2 = parent2[cut1:cut2+1]
+    count_p1 = Counter(parent1)
+    count_p2 = Counter(parent2)
+    for num in middle_segment_1:
+        count_p1[num] -= 1  
+    for num in middle_segment_2:
+        count_p2[num] -= 1  
+    remaining_from_p2 = []
+    remaining_from_p1 = []
+    for num in parent2:
+        if count_p1[num] > 0:
+            remaining_from_p2.append(num)
+            count_p1[num] -= 1
+    for num in parent1:
+        if count_p2[num] > 0:
+            count_p2[num] -= 1
+    child1 = remaining_from_p2[:cut1] + middle_segment_1 + remaining_from_p2[cut1:]
+    child2 = remaining_from_p1[:cut1] + middle_segment_2 + remaining_from_p1[cut1:]
+    return child1, child2
+crossover_method = [crossover1, crossover2, crossover3]
+
+def genetic_algorithm(Number_of_component, processing_time, assembly_time, TS, pop_size, cross_rate, mutation_rate, generations, max_time):
+    start_time = time.time()
+    population = [(generate_random_order(Number_of_component), generate_record_order(Number_of_component)) for _ in range(pop_size)]
+    cmax_values = []
+    fitness = []
+    for gen in range(generations):
+        if time.time() - start_time > max_time:
+            break
+        fitness = [(compute_Cmax(seqcom, seqprod, Number_of_component, processing_time, assembly_time, TS), seqcom, seqprod) for seqcom, seqprod in population]
+        fitness.sort()
+        ##cmax_values.append(fitness[0][0])
+        elapsed_time = time.time() - start_time
+        hours, rem = divmod(elapsed_time, 3600)
+        minutes, seconds = divmod(rem, 60)
+        population = [(seqcom, seqprod) for _, seqcom, seqprod in fitness]
+        ##print(population[0])
+        population = population[:pop_size]
+        fitness = fitness[:pop_size]
+        offspring = []
+        num_parents = int(len(population) * cross_rate)  # Chọn 50% quần thể làm cha mẹ
+        if num_parents % 2 == 1:  
+           num_parents += 1  # Đảm bảo số lượng là số chẵn để ghép cặp
+        selected_parents = roulette_wheel_selection([1 / f for f, _, _ in fitness], num_parents)
+        for i in range(0, num_parents, 2):
+            parent1, parent2 = population[selected_parents[i]], population[selected_parents[i + 1]]
+            crossover = random.choice(crossover_method)
+            child_seqcom1, child_seqcom2 = crossover(parent1[0], parent2[0])
+            child_seqprod1, child_seqprod2 = crossover(parent1[1], parent2[1])
+            if random.random() < mutation_rate:
+                child_seqcom1 = mutate(child_seqcom1)
+                child_seqcom2 = mutate(child_seqcom2)
+            offspring.append((child_seqcom1, child_seqprod1))
+            offspring.append((child_seqcom2, child_seqprod2))
+        fitness_2 = []
+        fitness_2 = [(compute_Cmax(seqcom, seqprod, Number_of_component, processing_time, assembly_time, TS), seqcom, seqprod) for seqcom, seqprod in offspring]
+        fitness_2.sort()
+        offspring = [(seqcom, seqprod) for _, seqcom, seqprod in fitness_2]
+        cmax_values.append(fitness_2[0][0])
+        print(f'Generation {gen}, Best values: {fitness_2[0][0]} |  Time elapsed: {int(hours)}h {int(minutes)}m {seconds:.2f}s')
+        print(offspring[0])
+        population.extend(offspring)
+        population = remove_duplicates(population)
+        new_numbers = []
+        current = 0
+        while len(new_numbers) < 5:
+          if current not in selected_parents and current not in new_numbers:
+              new_numbers.append(current)
+          current += 1
+        selected_parents = np.concatenate((selected_parents, new_numbers))
+        mutate_remaining(population, selected_parents, mutation_rate)
+        
+    best_solution = min(population, key=lambda x: compute_Cmax(x[0], x[1], Number_of_component, processing_time, assembly_time, TS))
+    return best_solution, compute_Cmax(best_solution[0], best_solution[1], Number_of_component, processing_time, assembly_time, TS), cmax_values
+
+POP = 80
+GEN = 80
+PCR = 0.8
+PMT = 0.08
+best_solution, compute_Cmax, cmax_values, population = genetic_algorithm(Number_of_component, processing_time, assembly_time, TS, pop_size = POP,cross_rate = PCR,mutation_rate=PMT, generations=GEN, max_time=7200)
