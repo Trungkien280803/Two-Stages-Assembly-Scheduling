@@ -1,0 +1,151 @@
+import numpy as np
+import pandas as pd
+import time
+import random
+import os
+def sequence_to_matrix(sequence):
+    unique_numbers = sorted(set(sequence))
+    rows = []
+    for num in sequence:
+        row = [0] * len(unique_numbers)
+        index = unique_numbers.index(num)
+        row[index] = 1
+        rows.append(row)
+    return np.array(rows).T, unique_numbers
+def compute_Cmax(Seqcom, Seqproduct, Number_of_component, processing_time, assembly_time, TS):
+    Com_index, Seqcom_index = Seqcom_matrix.shape
+    Product_index, Seqproduct_index = Seqproduct_matrix.shape
+    Number_of_component_matrix = Number_of_component
+    E = np.zeros((Com_index, Seqcom_index))
+    for j in range(Com_index):
+        for l in range(1, Seqcom_index):
+    E = np.round(E).astype(int)
+    D = np.sum(E, axis=0, keepdims=True)
+    TC = np.zeros(Seqcom_index).astype(float)
+    for j in range(Com_index):
+        if Seqcom_matrix[j, 0] == 1:
+            TC[0] = 30 + processing_time[j] + TS[j]
+    for l in range(1, Seqcom_index):
+        for j in range(Com_index):
+            if Seqcom_matrix[j, l] == 1:
+                TC[l] = 30 * (1 - D[0, l]) + processing_time[j] + max(TC[l-1], TS[j])
+    CC = np.cumsum(Seqcom_matrix, axis=1)
+    CP = np.zeros((Com_index, Seqproduct_index)).astype(int)
+    for j in range(Com_index):
+        for k in range(Seqproduct_index):
+            total = 0
+            for i in range(Seqproduct_index):
+                sum_Y = sum(Seqproduct_matrix[i, :k+1])
+                total += Number_of_component_matrix[i, j] * sum_Y
+            CP[j, k] = total
+    R = np.zeros((Com_index, Seqproduct_index, Seqcom_index)).astype(int)
+    for j in range(Com_index):
+        for k in range(Seqproduct_index):
+            for l in range(Seqcom_index):
+                R[j, k, l] = max(CP[j][k] - CC[j, l], 0)
+    Avt = np.where(R.sum(axis=0) == 0, 0, 1e6) + TC[np.newaxis, :]
+    TP = np.zeros(Seqproduct_index).astype(float)
+    min_Avt = np.min(Avt, axis=1)
+    F = np.zeros(Seqproduct_index).astype(float)
+    for k in range(Seqproduct_index):
+        for i in range(Seqproduct_index):
+            F[k] += assembly_time[i] * Seqproduct_matrix[i][k]
+    TP[0] = min_Avt[0] + F[0]
+    for k in range(1, Seqproduct_index):
+        TP[k] = max(min_Avt[k], TP[k-1]) + F[k]
+    return np.max(TP)
+def run_all_sets(output_path="Cmax_results_DRP_final_tryal_2.xlsx"):
+    writer = pd.ExcelWriter(output_path, engine='xlsxwriter')
+    for i in range(1, 21):
+        file_path = f"C:/Users/admin/AppData/Roaming/IBM/ILOG/CPLEX_Studio2211/workspace/DoAnThietKe/Data_{i}.xlsx"
+        data = pd.read_excel(file_path, sheet_name="Sheet1", header=None)
+        processing_2 = data.iloc[5, 4:].astype(float).to_numpy()
+        assembly = data.iloc[7:, 2].astype(float).to_numpy()
+        sum_num_com = data.iloc[0, 4:].astype(float).to_numpy()
+        start_time = data.iloc[1, 4:].astype(float).to_numpy()
+        index_pro = len(assembly)
+        Number = data.iloc[7:, 4:].astype(float).to_numpy()
+        index_com = len(processing_2)
+        # Component rules
+        ERD1 = np.concatenate([np.repeat(idx + 1, sum_num_com[idx]) for idx in np.argsort(start_time)])
+        SPT1 = np.concatenate([np.repeat(idx + 1, sum_num_com[idx]) for idx in np.argsort(processing_2 * sum_num_com)])
+        LPT1 = np.concatenate([np.repeat(idx + 1, sum_num_com[idx]) for idx in np.argsort(processing_2 * sum_num_com)[::-1]])
+        # Product rules
+        FCFS2 = np.arange(1, index_pro + 1)
+        SPT2 = np.concatenate([np.repeat(idx + 1, 1) for idx in np.argsort(assembly)])
+        LPT2 = np.concatenate([np.repeat(idx + 1, 1) for idx in np.argsort(assembly)[::-1]])
+        # ATCSR
+        Number_component = len(processing_2)
+        Total_numer = np.sum(Number)
+        Total_numer_component = np.sum(Number, axis=0)
+        Set_up_data = pd.read_excel('C:/Users/admin/AppData/Roaming/IBM/ILOG/CPLEX_Studio2211/workspace/DoAnThietKe/Input.xlsx', sheet_name='Set_up', index_col=0).values.astype(float)
+        Set_up = Set_up_data[:Number_component + 1, :Number_component]
+        Avg_manufacturing_time = np.sum(processing_2 * Total_numer_component) / Total_numer
+        start_time = np.array(start_time).flatten()
+        if start_time.size == 1:
+            start_time = np.full_like(processing_2, fill_value=start_time[0], dtype=float)
+    # Tính ATCSR theo tổng workload
+        Total_workload = processing_2 * Total_numer_component
+        Term_1 = 1 / Total_workload
+        Avg_manufacturing_time = np.sum(Total_workload) / index_com
+        Term_2 = 1
+        Term_4 = np.zeros(Number_component)
+        K_2 = 0.5
+        K_3 = 1.2
+        t = 0
+        Total_numer_component_0 = Total_numer_component.copy()
+        A1 = []
+        l = 0
+        while np.any(Total_numer_component_0 > 0):
+            Set_up_1 = Set_up[l, :]
+            Avg_set_up = np.mean(Set_up_1)
+            Term_3 = np.exp(-Set_up_1 / (K_2 * Avg_set_up))
+            for idx in range(Number_component):
+                if Total_numer_component_0[idx] > 0:
+                    Term_4[idx] = np.exp(-max(start_time[idx] - t, 0) / (K_3 * Avg_manufacturing_time))
+                else:
+                    Term_4[idx] = 0
+            ATCSR = Term_1 * Term_2 * Term_3 * Term_4
+            max_index = int(np.argmax(ATCSR))
+
+        # ✅ Cộng toàn bộ thời gian xử lý cho linh kiện đã chọn
+            t += processing_2[max_index] * Total_numer_component[max_index] + 30
+
+        # ✅ Ghi nhận thứ tự theo số lượng
+            A1.extend([max_index + 1] * int(Total_numer_component[max_index]))
+
+        # ✅ Loại bỏ component đã chọn
+            Total_numer_component_0[max_index] = 0
+            l = max_index + 1
+
+        # Dispatching combinations
+        dispatch_pairs = [
+            ("ERD1", "FCFS2"), ("ERD1", "SPT2"), ("ERD1", "LPT2"),
+            ("SPT1", "FCFS2"), ("SPT1", "SPT2"), ("SPT1", "LPT2"),
+            ("LPT1", "FCFS2"), ("LPT1", "SPT2"), ("LPT1", "LPT2"),
+            ("A1", "FCFS2"), ("A1", "SPT2"), ("A1", "LPT2")
+        ]
+        
+        local_vars = locals()
+        results = []
+        for seqcom_name, seqprod_name in dispatch_pairs:
+            Cmax = compute_Cmax(
+                local_vars[seqcom_name],
+                local_vars[seqprod_name],
+                Number,
+                processing_2,
+                assembly,
+                start_time
+            )
+            results.append(Cmax)
+        
+        matrix_Cmax = np.array(results).reshape(4, 3)
+        matrix_Cmax = matrix_Cmax.T
+        df_result = pd.DataFrame(matrix_Cmax, index=['FCFS', 'SPT', 'LPT'], columns=['ERD', 'SPT', 'LPT', 'ATCSR'])
+        df_result.to_excel(writer, sheet_name=f"Data_{i}")
+
+    writer.close()
+    print(f"✅ Done! Output saved to {output_path}")
+
+# Gọi hàm
+run_all_sets()
